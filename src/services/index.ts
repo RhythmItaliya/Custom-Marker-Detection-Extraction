@@ -1,0 +1,1 @@
+export { MarkerDetectionService } from './MarkerDetectionService';
