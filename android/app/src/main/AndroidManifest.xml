@@ -1,6 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-permission android:name="android.permission.INTERNET" />
+  <!--  Network  -->
+  <uses-permission android:name="android.permission.INTERNET"/>
+  <!--  Camera — required by react-native-camera-kit & react-native-permissions  -->
+  <uses-permission android:name="android.permission.CAMERA"/>
+  <uses-feature android:name="android.hardware.camera" android:required="true"/>
+  <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+  <!--  Storage — required by react-native-fs to write marker PNGs to cache  -->
+  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
+  <!--  Vibration — required by react-native-haptic-feedback  -->
+  <uses-permission android:name="android.permission.VIBRATE"/>
 
     <application
       android:name=".MainApplication"
