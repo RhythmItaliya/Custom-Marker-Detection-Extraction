@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, Dimensions } from 'react-native';
 import Animated, {
     useSharedValue,
     useAnimatedStyle,
@@ -7,15 +7,17 @@ import Animated, {
     withTiming,
     Easing,
 } from 'react-native-reanimated';
-import { Colors, Spacing } from '@/constants/appConstants';
+import { Colors } from '@/constants/appConstants';
+
+const SCREEN_H = Dimensions.get('window').height;
 
 export function ScanLine(): React.ReactElement {
     const translateY = useSharedValue(0);
 
     useEffect(() => {
         translateY.value = withRepeat(
-            withTiming(220, {
-                duration: 1800,
+            withTiming(SCREEN_H, {
+                duration: 2400,
                 easing: Easing.inOut(Easing.quad),
             }),
             -1,
@@ -33,9 +35,9 @@ export function ScanLine(): React.ReactElement {
 const styles = StyleSheet.create({
     line: {
         position: 'absolute',
-        left: Spacing.xxl,
-        right: Spacing.xxl,
-        top: 100,
+        left: 0,
+        right: 0,
+        top: 0,
         height: 2,
         borderRadius: 1,
         backgroundColor: Colors.cyan,

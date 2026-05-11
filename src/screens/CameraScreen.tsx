@@ -6,19 +6,24 @@ import {
     StyleSheet,
     TouchableOpacity,
     StatusBar,
+    Pressable,
+    GestureResponderEvent,
 } from 'react-native';
 import { Camera, CameraType } from 'react-native-camera-kit';
 import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { useMarkerStore, selectMarkerCount } from '@/store';
 import { useScanSession } from '@/hooks';
 import { requestCameraPermission } from '@/utils/permissions';
+import { RootStackParamList } from '@/types';
 import {
     ScanLine,
     DetectionBox,
     ProgressBar,
     StatusRow,
     DebugOverlay,
+    FocusIndicator,
 } from '@/components/camera';
 import {
     Colors,
@@ -27,13 +32,24 @@ import {
     MAX_MARKERS,
     Spacing,
 } from '@/constants/appConstants';
+import { CameraApi } from 'react-native-camera-kit';
+import { Beaker, ClipboardList } from 'lucide-react-native';
+
+type CameraScreenNavigationProp = NativeStackNavigationProp<
+    RootStackParamList,
+    'Camera'
+>;
 
 /* Live marker scanning interface */
 export default function CameraScreen(): React.ReactElement {
-    const navigation = useNavigation<any>();
-    const cameraRef = useRef<any>(null);
+    const navigation = useNavigation<CameraScreenNavigationProp>();
+    const cameraRef = useRef<CameraApi>(null);
 
     const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+    const [focusPoint, setFocusPoint] = useState<{
+        x: number;
+        y: number;
+    } | null>(null);
 
     const { scanStatus } = useMarkerStore();
     const markerCount = useMarkerStore(selectMarkerCount);
@@ -50,6 +66,11 @@ export default function CameraScreen(): React.ReactElement {
     /* Camera access */
     useEffect(() => {
         requestCameraPermission().then(setHasPermission);
+    }, []);
+
+    const handleTapToFocus = useCallback((event: GestureResponderEvent) => {
+        const { locationX, locationY } = event.nativeEvent;
+        setFocusPoint({ x: locationX, y: locationY });
     }, []);
 
     /* Toggle scanning session */
@@ -128,14 +149,28 @@ export default function CameraScreen(): React.ReactElement {
         The 2000px capture resolution is enforced inside useScanSession via
         capture({ quality: 1.0 }) which uses the device's native max resolution.
       */}
-            <Camera
-                ref={cameraRef}
+            <Pressable
                 style={StyleSheet.absoluteFill}
-                cameraType={CameraType.Back}
-                flashMode="auto"
-                onReadCode={() => {}}
-                onOrientationChange={() => {}}
-            />
+                onPress={handleTapToFocus}
+            >
+                <Camera
+                    ref={cameraRef}
+                    style={StyleSheet.absoluteFill}
+                    cameraType={CameraType.Back}
+                    flashMode="auto"
+                    focusMode="on"
+                    onReadCode={() => {}}
+                    onOrientationChange={() => {}}
+                />
+                {focusPoint && (
+                    <FocusIndicator
+                        key={`${focusPoint.x}-${focusPoint.y}-${Date.now()}`}
+                        x={focusPoint.x}
+                        y={focusPoint.y}
+                        onComplete={() => setFocusPoint(null)}
+                    />
+                )}
+            </Pressable>
 
             {scanStatus === 'scanning' && <ScanLine />}
 
@@ -149,11 +184,24 @@ export default function CameraScreen(): React.ReactElement {
 
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>MarkerScanner</Text>
-                <TouchableOpacity
-                    onPress={() => navigation.navigate('History')}
-                >
-                    <Text style={styles.historyLink}>History</Text>
-                </TouchableOpacity>
+                <View style={styles.headerLinks}>
+                    <TouchableOpacity
+                        onPress={() => navigation.navigate('Test')}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                        <Beaker
+                            color={Colors.cyan}
+                            size={24}
+                            style={{ marginRight: 16 }}
+                        />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={() => navigation.navigate('History')}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                        <ClipboardList color={Colors.cyan} size={24} />
+                    </TouchableOpacity>
+                </View>
             </View>
 
             <ProgressBar current={markerCount} total={MAX_MARKERS} />
@@ -195,6 +243,10 @@ const styles = StyleSheet.create({
     },
     headerTitle: {
         ...Typography.title,
+    },
+    headerLinks: {
+        flexDirection: 'row',
+        alignItems: 'center',
     },
     historyLink: {
         ...Typography.subtitle,

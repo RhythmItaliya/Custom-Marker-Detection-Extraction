@@ -16,16 +16,14 @@ export function DebugOverlay({
     lastBounds,
     fps,
 }: DebugOverlayProps): React.ReactElement | null {
-    if (!__DEV__) return null;
-
     return (
         <View style={styles.container} pointerEvents="none">
-            <Text style={styles.text}>DEV MODE</Text>
+            <Text style={styles.text}>LIVE METRICS</Text>
             <Text style={styles.text}>Markers: {markerCount}</Text>
             <Text style={styles.text}>
                 Processing: {isProcessing ? 'YES' : 'no'}
             </Text>
-            <Text style={styles.text}>FPS: ~{fps.toFixed(1)}</Text>
+            <Text style={styles.text}>Frame: {fps}ms</Text>
             {lastBounds && (
                 <Text style={styles.text}>
                     Bounds: {Math.round(lastBounds.x)},

@@ -20,16 +20,20 @@ export function ProgressBar({
     const progress = useSharedValue(0);
 
     useEffect(() => {
-        progress.value = withTiming(current / total, { duration: 300 });
+        progress.value = withTiming(total > 0 ? current / total : 0, { duration: 300 });
     }, [current, total, progress]);
 
-    const fillStyle = useAnimatedStyle(() => ({
-        width: `${interpolate(progress.value, [0, 1], [0, 100])}%` as any,
-    }));
+    const fillStyle = useAnimatedStyle(() => {
+        return {
+            width: `${Math.max(0, Math.min(100, progress.value * 100))}%` as any,
+        };
+    });
 
     return (
-        <View style={styles.container}>
-            <Animated.View style={[styles.fill, fillStyle]} />
+        <View style={styles.container} pointerEvents="none">
+            <View style={styles.track}>
+                <Animated.View style={[styles.fill, fillStyle]} />
+            </View>
             <Text style={styles.label}>
                 {current} / {total} markers
             </Text>
@@ -40,9 +44,13 @@ export function ProgressBar({
 const styles = StyleSheet.create({
     container: {
         position: 'absolute',
-        bottom: 160,
+        bottom: 150,
         left: Spacing.xxl,
         right: Spacing.xxl,
+        alignItems: 'center',
+    },
+    track: {
+        width: '100%',
         height: 6,
         borderRadius: 3,
         backgroundColor: Colors.surfaceSubtle,
@@ -54,9 +62,7 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.cyan,
     },
     label: {
-        position: 'absolute',
-        top: 10,
-        alignSelf: 'center',
+        marginTop: 12,
         ...Typography.caption,
         color: Colors.muted,
         fontWeight: '500',

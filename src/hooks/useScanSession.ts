@@ -8,6 +8,7 @@ import {
     SCAN_INTERVAL_MS,
     CAMERA_RESOLUTION,
 } from '@/constants/appConstants';
+import { CameraApi } from 'react-native-camera-kit';
 
 interface UseScanSessionReturn {
     detectedBounds: MarkerBounds | null;
@@ -15,7 +16,7 @@ interface UseScanSessionReturn {
     devFps: number;
     devProcessing: boolean;
     startScanning(
-        cameraRef: React.RefObject<any>,
+        cameraRef: React.RefObject<CameraApi | null>,
         onComplete: () => void,
     ): void;
     stopScanning(): void;
@@ -52,7 +53,10 @@ export function useScanSession(): UseScanSessionReturn {
     }, [stopSession]);
 
     const startScanning = useCallback(
-        (cameraRef: React.RefObject<any>, onComplete: () => void) => {
+        (
+            cameraRef: React.RefObject<CameraApi | null>,
+            onComplete: () => void,
+        ) => {
             if (intervalRef.current) return;
 
             const currentCount =
@@ -84,12 +88,14 @@ export function useScanSession(): UseScanSessionReturn {
                 }
 
                 isProcessing.current = true;
-                if (__DEV__) setDevProcessing(true);
+                setDevProcessing(true);
+
+                await new Promise(resolve =>
+                    setTimeout(() => resolve(undefined), 10),
+                );
 
                 try {
-                    const capture = await cameraRef.current.capture({
-                        quality: 1.0,
-                    });
+                    const capture = await cameraRef.current.capture();
                     if (!capture?.uri) return;
 
                     setCaptureSize({
@@ -97,12 +103,12 @@ export function useScanSession(): UseScanSessionReturn {
                         h: capture.height ?? CAMERA_RESOLUTION,
                     });
 
-                    if (__DEV__) {
-                        const now = Date.now();
-                        const elapsed = (now - lastFrameTime.current) / 1000;
-                        if (elapsed > 0) setDevFps(Math.round(1 / elapsed));
-                        lastFrameTime.current = now;
+                    const now = Date.now();
+                    const elapsedMs = now - lastFrameTime.current;
+                    if (lastFrameTime.current !== 0) {
+                        setDevFps(elapsedMs);
                     }
+                    lastFrameTime.current = now;
 
                     const detectResult =
                         await MarkerDetectionService.detectWithBase64(
@@ -146,11 +152,10 @@ export function useScanSession(): UseScanSessionReturn {
                         onComplete();
                     }
                 } catch (err) {
-                    if (__DEV__)
-                        console.warn('[useScanSession] cycle error:', err);
+                    console.error('Scan session error:', err);
                 } finally {
                     isProcessing.current = false;
-                    if (__DEV__) setDevProcessing(false);
+                    setDevProcessing(false);
                 }
             }, SCAN_INTERVAL_MS);
         },
