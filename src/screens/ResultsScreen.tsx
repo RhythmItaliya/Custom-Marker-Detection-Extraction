@@ -39,6 +39,9 @@ import {
 } from '@/constants/appConstants';
 import { DetectedMarker, StatItem } from '@/types';
 
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '@/types';
+
 /* Grid item type */
 
 interface GridItem {
@@ -46,11 +49,16 @@ interface GridItem {
     marker: DetectedMarker | null;
 }
 
+type ResultsScreenNavigationProp = NativeStackNavigationProp<
+    RootStackParamList,
+    'Results'
+>;
+
 /* ResultsScreen */
 
 /* Displays the outcome of a scan session in a grid */
 export default function ResultsScreen(): React.ReactElement {
-    const navigation = useNavigation<any>();
+    const navigation = useNavigation<ResultsScreenNavigationProp>();
     const currentSession = useMarkerStore(selectCurrentSession);
     const elapsed = useMarkerStore(selectElapsedSeconds);
 

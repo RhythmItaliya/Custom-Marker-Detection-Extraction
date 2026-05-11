@@ -2,32 +2,32 @@ import { StyleSheet } from 'react-native';
 
 export const Colors = {
     /* Base colors */
-    bg: '#08090B',
-    surface: '#121418',
-    surfaceSubtle: 'rgba(255,255,255,0.03)',
-    overlay: 'rgba(0,0,0,0.65)',
-    border: 'rgba(255,255,255,0.1)',
-    borderAccent: 'rgba(0,242,255,0.2)',
+    bg: '#0B0D17',
+    surface: '#151828',
+    surfaceSubtle: 'rgba(255,255,255,0.05)',
+    overlay: 'rgba(0,0,0,0.7)',
+    border: 'rgba(255,255,255,0.08)',
+    borderAccent: 'rgba(99,102,241,0.3)',
 
     /* Accent colors */
-    cyan: '#00F2FF',
-    cyanSemi: 'rgba(0,242,255,0.85)',
-    green: '#00FF9D',
-    red: '#FF4D4D',
-    yellow: '#FFD600',
+    cyan: '#6366F1' /* Indigo primary */,
+    cyanSemi: 'rgba(99,102,241,0.85)',
+    green: '#10B981' /* Emerald success */,
+    red: '#EF4444' /* Rose error */,
+    yellow: '#F59E0B' /* Amber warning */,
 
     /* Text colors */
     white: '#FFFFFF',
     black: '#000000',
-    muted: '#A0AEC0',
-    textTertiary: '#4A5568',
+    muted: '#94A3B8',
+    textTertiary: '#475569',
 
     /* Semantic colors */
-    scanLine: '#00F2FF',
-    detectionBox: '#00FF9D',
-    detectionBoxBg: 'rgba(0,255,157,0.08)',
-    badgeCompleteBg: 'rgba(0,255,157,0.15)',
-    badgePartialBg: 'rgba(255,77,77,0.12)',
+    scanLine: '#6366F1',
+    detectionBox: '#10B981',
+    detectionBoxBg: 'rgba(16,185,129,0.1)',
+    badgeCompleteBg: 'rgba(16,185,129,0.15)',
+    badgePartialBg: 'rgba(239,68,68,0.12)',
 } as const;
 
 export const Typography = StyleSheet.create({
