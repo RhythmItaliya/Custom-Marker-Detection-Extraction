@@ -40,6 +40,7 @@ export type RootStackParamList = {
     Camera: undefined;
     Results: undefined;
     History: undefined;
+    Test: undefined;
 };
 
 /* Stat item for StatsRow */

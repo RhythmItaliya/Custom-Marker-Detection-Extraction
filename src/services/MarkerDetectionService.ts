@@ -17,6 +17,7 @@ import type {
     Mat,
     PointVectorOfVectors,
     PointVector,
+    Point2f,
     Size,
     Scalar,
 } from 'react-native-fast-opencv';
@@ -107,27 +108,27 @@ export class MarkerDetectionService {
                 ContourApproximationModes.CHAIN_APPROX_SIMPLE,
             );
 
-            const bounds = MarkerDetectionService._bestCandidate(
+            /* Try Marker1 (solid border) first */
+            let bounds = MarkerDetectionService._bestCandidate(
                 contours,
                 imageArea,
                 cols,
                 rows,
             );
 
-            if (__DEV__) {
-                const { array } = OpenCV.toJSValue(contours);
-                console.log(
-                    '[Detection] contours found:',
-                    array.length,
-                    '| best:',
-                    bounds,
+            /* Fall back to Marker2 (dashed border hull) */
+            if (!bounds) {
+                bounds = MarkerDetectionService._marker2Candidate(
+                    contours,
+                    imageArea,
+                    cols,
+                    rows,
                 );
             }
 
             if (!bounds) return null;
             return { bounds, base64 };
         } catch (err) {
-            if (__DEV__) console.warn('[Detection] error:', err);
             return null;
         } finally {
             if (contours) OpenCV.clearBuffers([contours.id]);
@@ -160,7 +161,7 @@ export class MarkerDetectionService {
         let gray: Mat | null = null;
         let warpSize: Size | null = null;
         let borderValue: Scalar | null = null;
-        const pts: any[] = [];
+        const pts: Point2f[] = [];
         const S = MARKER_OUTPUT_SIZE;
 
         try {
@@ -290,6 +291,13 @@ export class MarkerDetectionService {
                 ColorConversionCodes.COLOR_BGR2GRAY,
             );
 
+            /* Content validation — 6x6 grid + solid blob check (Python-ported logic) */
+            const isValid = MarkerDetectionService.validateWarpedMarker(
+                gray,
+                S,
+            );
+            if (!isValid) return null;
+
             /* Orientation correction at find darkest corner quadrant (marker dot) */
             const rotation = MarkerDetectionService._getRotationToTopLeft(gray);
             if (rotation !== 0) {
@@ -319,18 +327,8 @@ export class MarkerDetectionService {
                 height: S,
             };
 
-            if (__DEV__) {
-                console.log(
-                    '[Extract] saved marker:',
-                    marker.uri,
-                    'conf:',
-                    marker.confidence,
-                );
-            }
-
             return marker;
         } catch (err) {
-            if (__DEV__) console.warn('[Extract] error:', err);
             return null;
         } finally {
             if (borderValue) OpenCV.clearBuffers([borderValue.id]);
@@ -353,16 +351,25 @@ export class MarkerDetectionService {
 
     /* Private helpers */
 
-    /* Filters contours for square candidates */
+    /* ------------------------------------------------------------------ */
+    /* Marker1: single solid-border contour → warp → validate content       */
+    /* ------------------------------------------------------------------ */
     private static _bestCandidate(
         contours: PointVectorOfVectors,
         imageArea: number,
         imageW: number,
         imageH: number,
     ): MarkerBounds | null {
-        let best: MarkerBounds | null = null;
-        let bestArea = 0;
-
+        /* Collect all square-shaped quad candidates sorted by area (largest first) */
+        type Candidate = {
+            area: number;
+            approxPts: { x: number; y: number }[];
+            rx: number;
+            ry: number;
+            rw: number;
+            rh: number;
+        };
+        const candidates: Candidate[] = [];
         const { array } = OpenCV.toJSValue(contours);
 
         for (let i = 0; i < array.length; i++) {
@@ -370,73 +377,335 @@ export class MarkerDetectionService {
                 contours,
                 i,
             );
-
             try {
-                const { value: perimeter } = OpenCV.invoke(
-                    'arcLength',
-                    contour,
-                    true,
-                );
-                const approx: PointVector = OpenCV.createObject(
-                    ObjectType.PointVector,
-                );
-                OpenCV.invoke(
-                    'approxPolyDP',
-                    contour,
-                    approx,
-                    0.02 * perimeter,
-                    true,
-                );
-
-                const { array: approxPts } = OpenCV.toJSValue(approx);
-                OpenCV.clearBuffers([approx.id]);
-
-                /* Must be quadrilateral */
-                if (approxPts.length !== 4) continue;
-
                 const { value: area } = OpenCV.invoke('contourArea', contour);
                 const rectObj = OpenCV.invoke('boundingRect', contour);
                 const rect = OpenCV.toJSValue(rectObj);
-
-                /* Clamp to image bounds */
                 const rx = Math.max(0, rect.x);
                 const ry = Math.max(0, rect.y);
                 const rw = Math.min(rect.width, imageW - rx);
                 const rh = Math.min(rect.height, imageH - ry);
 
                 if (
-                    MarkerDetectionService._isValidSquare(
+                    !MarkerDetectionService._isValidSquare(
                         rw,
                         rh,
                         area,
                         imageArea,
-                    ) &&
-                    MarkerDetectionService._hasMarkerSignature(
-                        rx,
-                        ry,
-                        rw,
-                        rh,
-                        imageW,
                     )
-                ) {
-                    if (area > bestArea) {
-                        bestArea = area;
-                        best = {
-                            x: rx,
-                            y: ry,
-                            width: rw,
-                            height: rh,
-                            corners:
-                                MarkerDetectionService._sortCorners(approxPts),
-                        };
+                )
+                    continue;
+                if (rw < 40) continue;
+
+                /* Try multiple epsilon values for quad approximation */
+                const hull: PointVector = OpenCV.createObject(
+                    ObjectType.PointVector,
+                );
+                OpenCV.invoke(
+                    'convexHull',
+                    contour as unknown as Mat,
+                    hull as unknown as Mat,
+                );
+                const { value: hullPerim } = OpenCV.invoke(
+                    'arcLength',
+                    hull,
+                    true,
+                ) as any;
+
+                let approxPts: { x: number; y: number }[] | null = null;
+                for (const eps of [0.02, 0.04, 0.06, 0.09, 0.13, 0.2]) {
+                    const approx: PointVector = OpenCV.createObject(
+                        ObjectType.PointVector,
+                    );
+                    OpenCV.invoke(
+                        'approxPolyDP',
+                        hull,
+                        approx,
+                        eps * hullPerim,
+                        true,
+                    );
+                    const { array: pts } = OpenCV.toJSValue(approx);
+                    OpenCV.clearBuffers([approx.id]);
+                    if (pts.length === 4) {
+                        approxPts = pts;
+                        break;
                     }
                 }
+                OpenCV.clearBuffers([hull.id]);
+
+                if (approxPts)
+                    candidates.push({ area, approxPts, rx, ry, rw, rh });
             } finally {
                 OpenCV.clearBuffers([contour.id]);
             }
         }
 
-        return best;
+        candidates.sort((a, b) => b.area - a.area);
+
+        /* Validate each candidate with content checks */
+        /* NOTE: Full grid content check happens in extract() after warp.
+           Here we just return the best geometric candidate so the pipeline
+           can warp it, then _validateContent() is called post-warp.       */
+        if (candidates.length > 0) {
+            const c = candidates[0];
+            return {
+                x: c.rx,
+                y: c.ry,
+                width: c.rw,
+                height: c.rh,
+                corners: MarkerDetectionService._sortCorners(c.approxPts),
+            };
+        }
+        return null;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Marker2: convex hull of ALL significant contours (dashed border)     */
+    /* ------------------------------------------------------------------ */
+    static _marker2Candidate(
+        contours: PointVectorOfVectors,
+        imageArea: number,
+        imageW: number,
+        imageH: number,
+    ): MarkerBounds | null {
+        const { array } = OpenCV.toJSValue(contours);
+        /* Gather all significant contour points */
+        const allPts: PointVector[] = [];
+        for (let i = 0; i < array.length; i++) {
+            const c: PointVector = OpenCV.copyObjectFromVector(contours, i);
+            const { value: a } = OpenCV.invoke('contourArea', c);
+            if (a >= 50) allPts.push(c);
+            else OpenCV.clearBuffers([c.id]);
+        }
+        if (allPts.length === 0) return null;
+
+        /* Merge into a single convex hull */
+        const merged: PointVector = OpenCV.createObject(ObjectType.PointVector);
+        for (const p of allPts) {
+            OpenCV.invoke(
+                'copyTo' as any,
+                p as unknown as Mat,
+                merged as unknown as Mat,
+            );
+            OpenCV.clearBuffers([p.id]);
+        }
+        const hull: PointVector = OpenCV.createObject(ObjectType.PointVector);
+        OpenCV.invoke(
+            'convexHull',
+            merged as unknown as Mat,
+            hull as unknown as Mat,
+        );
+        OpenCV.clearBuffers([merged.id]);
+
+        const { value: hullArea } = OpenCV.invoke('contourArea', hull) as any;
+        const areaRatio = hullArea / imageArea;
+        if (areaRatio < MIN_AREA_FRACTION || areaRatio > MAX_AREA_FRACTION) {
+            OpenCV.clearBuffers([hull.id]);
+            return null;
+        }
+
+        const rectObj = OpenCV.invoke('boundingRect', hull);
+        const rect = OpenCV.toJSValue(rectObj);
+        const rx = Math.max(0, rect.x);
+        const ry = Math.max(0, rect.y);
+        const rw = Math.min(rect.width, imageW - rx);
+        const rh = Math.min(rect.height, imageH - ry);
+
+        if (
+            !MarkerDetectionService._isValidSquare(
+                rw,
+                rh,
+                hullArea,
+                imageArea,
+            ) ||
+            rw < 60
+        ) {
+            OpenCV.clearBuffers([hull.id]);
+            return null;
+        }
+
+        /* Quad approximation on hull */
+        const { value: hullPerim } = OpenCV.invoke('arcLength', hull, true);
+        let approxPts: { x: number; y: number }[] | null = null;
+        for (const eps of [0.02, 0.04, 0.06, 0.09, 0.13, 0.18, 0.25]) {
+            const approx: PointVector = OpenCV.createObject(
+                ObjectType.PointVector,
+            );
+            OpenCV.invoke('approxPolyDP', hull, approx, eps * hullPerim, true);
+            const { array: pts } = OpenCV.toJSValue(approx);
+            OpenCV.clearBuffers([approx.id]);
+            if (pts.length === 4) {
+                approxPts = pts;
+                break;
+            }
+        }
+        OpenCV.clearBuffers([hull.id]);
+
+        if (!approxPts) return null;
+        return {
+            x: rx,
+            y: ry,
+            width: rw,
+            height: rh,
+            corners: MarkerDetectionService._sortCorners(approxPts),
+        };
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Content validation — 6x6 grid std-dev (ported from Python)          */
+    /* Active cells >= threshold → complex animal image → VALID            */
+    /* Active cells <  threshold → X symbol / empty    → REJECT            */
+    /* ------------------------------------------------------------------ */
+    /* Returns number of active cells (out of 36) */
+    private static _countActiveCells(gray: Mat, size: number): number {
+        const GRID = 6;
+        const MARGIN = Math.floor(size * 0.2);
+        const INNER = size - 2 * MARGIN;
+        const CELL = Math.floor(INNER / GRID);
+        const STD_THRESH = 15;
+        let active = 0;
+
+        for (let r = 0; r < GRID; r++) {
+            for (let c = 0; c < GRID; c++) {
+                const cellRect = OpenCV.createObject(
+                    ObjectType.Rect,
+                    MARGIN + c * CELL,
+                    MARGIN + r * CELL,
+                    CELL,
+                    CELL,
+                );
+                const cell: Mat = OpenCV.createObject(
+                    ObjectType.Mat,
+                    CELL,
+                    CELL,
+                    DataTypes.CV_8UC1,
+                );
+                OpenCV.invoke('crop', gray, cell, cellRect);
+
+                /* std = sqrt(mean(x^2) - mean(x)^2) */
+                const meanScalar = OpenCV.invoke('mean', cell);
+                const { a: mean } = OpenCV.toJSValue(meanScalar);
+
+                /* Compute variance via meanStdDev */
+                const meanOut: Mat = OpenCV.createObject(
+                    ObjectType.Mat,
+                    1,
+                    1,
+                    DataTypes.CV_64F,
+                );
+                const stdOut: Mat = OpenCV.createObject(
+                    ObjectType.Mat,
+                    1,
+                    1,
+                    DataTypes.CV_64F,
+                );
+                OpenCV.invoke('meanStdDev', cell, meanOut, stdOut);
+                const { value: stdVal } = OpenCV.toJSValue(stdOut) as any;
+
+                if (stdVal >= STD_THRESH) active++;
+
+                OpenCV.clearBuffers([
+                    cell.id,
+                    cellRect.id,
+                    meanScalar.id,
+                    meanOut.id,
+                    stdOut.id,
+                ]);
+            }
+        }
+        return active;
+    }
+
+    /* Detect solid square/circular blob (X pattern) → reject if circularity > 0.65 */
+    private static _hasSolidBlob(gray: Mat, size: number): boolean {
+        const MARGIN = Math.floor(size * 0.2);
+        const INNER = size - 2 * MARGIN;
+
+        const innerRect = OpenCV.createObject(
+            ObjectType.Rect,
+            MARGIN,
+            MARGIN,
+            INNER,
+            INNER,
+        );
+        const inner: Mat = OpenCV.createObject(
+            ObjectType.Mat,
+            INNER,
+            INNER,
+            DataTypes.CV_8UC1,
+        );
+        OpenCV.invoke('crop', gray, inner, innerRect);
+        OpenCV.clearBuffers([innerRect.id]);
+
+        const bw: Mat = OpenCV.createObject(
+            ObjectType.Mat,
+            INNER,
+            INNER,
+            DataTypes.CV_8UC1,
+        );
+        OpenCV.invoke(
+            'threshold',
+            inner,
+            bw,
+            80,
+            255,
+            ThresholdTypes.THRESH_BINARY_INV,
+        );
+        OpenCV.clearBuffers([inner.id]);
+
+        const innerContours: PointVectorOfVectors = OpenCV.createObject(
+            ObjectType.PointVectorOfVectors,
+        );
+        OpenCV.invoke(
+            'findContours',
+            bw,
+            innerContours,
+            RetrievalModes.RETR_EXTERNAL,
+            ContourApproximationModes.CHAIN_APPROX_SIMPLE,
+        );
+        OpenCV.clearBuffers([bw.id]);
+
+        const { array: iArr } = OpenCV.toJSValue(innerContours);
+        let hasSolid = false;
+        const innerArea = INNER * INNER;
+
+        for (let i = 0; i < iArr.length; i++) {
+            const ic: PointVector = OpenCV.copyObjectFromVector(
+                innerContours,
+                i,
+            );
+            const { value: area } = OpenCV.invoke('contourArea', ic);
+            const { value: perim } = OpenCV.invoke('arcLength', ic, true);
+            OpenCV.clearBuffers([ic.id]);
+
+            if (area < innerArea * 0.04 || perim === 0) continue;
+            const circ = (4 * Math.PI * area) / (perim * perim);
+            if (circ > 0.65) {
+                hasSolid = true;
+                break;
+            }
+        }
+
+        OpenCV.clearBuffers([innerContours.id]);
+        return hasSolid;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Validate warped marker: content complexity + no solid blob           */
+    /* Returns { valid, markerType } — markerType helps caller label result */
+    /* ------------------------------------------------------------------ */
+    static validateWarpedMarker(
+        gray: Mat,
+        size: number,
+        isMarker2 = false,
+    ): boolean {
+        const activeMin = isMarker2
+            ? 14
+            : 24; /* M2_ACTIVE_MIN=14, M1_ACTIVE_MIN=24 */
+        const active = MarkerDetectionService._countActiveCells(gray, size);
+        if (active < activeMin) return false;
+        if (MarkerDetectionService._hasSolidBlob(gray, size)) return false;
+        return true;
     }
 
     /* Area and aspect ratio validation */
@@ -454,21 +723,6 @@ export class MarkerDetectionService {
             areaFraction >= MIN_AREA_FRACTION &&
             areaFraction <= MAX_AREA_FRACTION
         );
-    }
-
-    /* Orientation heuristic based on quadrant intensity */
-    private static _hasMarkerSignature(
-        _rx: number,
-        _ry: number,
-        rw: number,
-        rh: number,
-        _imageW: number,
-    ): boolean {
-        if (rw <= 0 || rh <= 0) return false;
-        const ratio = rw / rh;
-        if (ratio < 0.6 || ratio > 1.4) return false;
-        if (rw < 40 || rh < 40) return false;
-        return true;
     }
 
     /* Confidence scoring */
